@@ -536,16 +536,17 @@ public class GameManager : MonoBehaviour
             }
         }
 
-        if (CrimeManager.Instance != null)
-            CrimeManager.Instance.RunCrimeTick();
+        // CityManager is the single source of truth for city services and happiness.
+        // Run it before legacy consequence systems so they read the latest capital values.
+        if (CityManager.Instance != null && CityManager.Instance.gameStarted)
+            CityManager.Instance.RunCityTick();
 
         if (HappinessManager.Instance != null)
             HappinessManager.Instance.RunHappinessTick();
 
-        if (CityManager.Instance != null && CityManager.Instance.gameStarted)
-            CityManager.Instance.RunCityTick();
-
-        RunCityServices();
+        // Global crime remains responsible for district coverage, national crime events and theft.
+        if (CrimeManager.Instance != null)
+            CrimeManager.Instance.RunCrimeTick();
 
         // Must run BEFORE RunFoodTick so farming total is current
         UpdateGlobalResourceTotals();
@@ -566,63 +567,6 @@ public class GameManager : MonoBehaviour
         gasoline += gasStock;
 
         ApplyPopulationAndWorkforceDecay();
-    }
-
-    // ─────────────────────────────────────────
-    // CITY SERVICES
-    // ─────────────────────────────────────────
-    void RunCityServices()
-    {
-        List<TileObject> allTiles = GridManager.Instance.allTiles;
-
-        int hospitals = 0, colleges = 0, policeStations = 0;
-
-        foreach (var tile in allTiles)
-        {
-            if (tile == null || tile.tileData == null) continue;
-            switch (tile.tileData.buildingType)
-            {
-                case BuildingType.Hospital:
-                    if (tile.isFunded) hospitals++;
-                    break;
-                case BuildingType.CollegeCampus:
-                    if (tile.isFunded) colleges++;
-                    break;
-                case BuildingType.PoliceStation:
-                    if (tile.isFunded) policeStations++;
-                    break;
-            }
-        }
-
-        if (population <= 0)
-        {
-            healthcare = 0;
-            education = 0;
-            crime = 0;
-            return;
-        }
-
-        int healthcareScore = hospitals * 20
-            - Mathf.Max(0, population / 200 - hospitals) * 10;
-        healthcare = Mathf.Clamp(healthcareScore, 0, 100);
-
-        int educationScore = colleges * 20
-            - Mathf.Max(0, population / 250 - colleges) * 10;
-        education = Mathf.Clamp(educationScore, 0, 100);
-
-        int crimeScore = population / 100
-            - policeStations * 20
-            + Mathf.Max(0, 50 - happiness) / 5;
-        crime = Mathf.Clamp(crimeScore, 0, 100);
-
-        if (population > 100)
-        {
-            happiness += Mathf.RoundToInt(
-                healthcare * 0.02f + education * 0.015f - crime * 0.03f);
-            happiness = Mathf.Clamp(happiness, 0, 100);
-            if (HappinessManager.Instance != null)
-                HappinessManager.Instance.happiness = happiness;
-        }
     }
 
     // ─────────────────────────────────────────
