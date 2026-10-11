@@ -319,15 +319,26 @@ public class CityManager : MonoBehaviour
 
         foreach (var tile in allTiles)
         {
+            if (tile == null || tile.tileData == null)
+                continue;
+
             if (tile.tileData.cityId != city.cityId)
                 continue;
 
             switch (tile.tileData.buildingType)
             {
-                case BuildingType.Hospital: hospitals++; break;
-                case BuildingType.CollegeCampus: colleges++; break;
-                case BuildingType.PoliceStation: policeStations++; break;
-                case BuildingType.Residential: residentials++; break;
+                case BuildingType.Hospital:
+                    if (tile.isFunded) hospitals++;
+                    break;
+                case BuildingType.CollegeCampus:
+                    if (tile.isFunded) colleges++;
+                    break;
+                case BuildingType.PoliceStation:
+                    if (tile.isFunded) policeStations++;
+                    break;
+                case BuildingType.Residential:
+                    residentials++;
+                    break;
             }
         }
 
@@ -366,10 +377,14 @@ public class CityManager : MonoBehaviour
         }
         else
         {
+            int policyCrimeModifier = PolicyManager.Instance != null
+                ? PolicyManager.Instance.CrimeModifier : 0;
+
             int crimeScore = pop / 100
                 - policeStations * 20
                 + Mathf.Max(0, 50 - city.happiness) / 5
-                + cfg.crimeBaseline;
+                + cfg.crimeBaseline
+                + policyCrimeModifier;
 
             city.crime = Mathf.Clamp(crimeScore, 0, 100);
         }
@@ -439,6 +454,15 @@ public class CityManager : MonoBehaviour
 
         // Crime
         h -= Mathf.RoundToInt(city.crime * 0.25f);
+
+        // Random events and fuel availability affect every city's residents.
+        if (RandomEventManager.Instance != null)
+            h += RandomEventManager.Instance.HappinessModifier;
+
+        if (GameManager.Instance.isGasShortage)
+            h -= 8;
+        else if (GameManager.Instance.monthlyGasSupplied > 0)
+            h += 3;
 
         // Policy happiness modifier
         if (PolicyManager.Instance != null)
@@ -537,9 +561,11 @@ public class CityManager : MonoBehaviour
             float happinessMod = 0.5f + (city.happiness / 100f);
             income = Mathf.RoundToInt(income * happinessMod);
 
-            // Crime reduces tax revenue
-            float crimeMod = HappinessManager.Instance != null
-                ? HappinessManager.Instance.GetTaxCrimeModifier() : 1f;
+            // Use this city's crime level, not the capital's/national average.
+            float crimeMod = city.crime >= 70 ? 0.50f
+                : city.crime >= 50 ? 0.75f
+                : city.crime >= 30 ? 0.90f
+                : 1f;
             income = Mathf.RoundToInt(income * crimeMod);
 
             // Random events (market crash, sanctions)
