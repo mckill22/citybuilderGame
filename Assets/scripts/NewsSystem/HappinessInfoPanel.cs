@@ -83,12 +83,12 @@ public class HappinessInfoPanel : MonoBehaviour
         Set(educationText, FormatRow("Education", hm.educationBonus));
         Set(crimeText, FormatRow("Crime impact", -hm.crimePenalty));
 
-        int eventModifier = RandomEventManager.Instance != null
-            ? RandomEventManager.Instance.HappinessModifier : 0;
+        int otherEffects = hm.otherFactorsBonus;
         if (eventsText != null)
         {
-            eventsText.gameObject.SetActive(eventModifier != 0);
-            if (eventModifier != 0) eventsText.text = FormatRow("Active event", eventModifier);
+            eventsText.gameObject.SetActive(otherEffects != 0);
+            if (otherEffects != 0)
+                eventsText.text = FormatRow("Government / events / fuel", otherEffects);
         }
 
         StringBuilder warnings = new StringBuilder();
