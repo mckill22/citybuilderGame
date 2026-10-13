@@ -98,7 +98,7 @@ public class CitizenAgent : MonoBehaviour
             return;
         }
 
-        for (int attempt = 0; attempt < 16; attempt++)
+        for (int attempt = 0; attempt < 4; attempt++)
         {
             TileObject candidate = districts[Random.Range(0, districts.Count)];
             if (candidate == null || candidate == currentTile || !IsWalkable(candidate))
