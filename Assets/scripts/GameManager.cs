@@ -50,6 +50,8 @@ public class GameManager : MonoBehaviour
     public int startingFreeTrucks = 25;
     public int startingFood = 500;          // set in Inspector — consumed over time
     [HideInInspector] public int foodStock; // runtime depleting stock
+    [HideInInspector] public int foodProducedLastTick;
+    [HideInInspector] public int foodDemandLastTick;
     public int startingGas = 1000;
     [HideInInspector] public int gasStock;
 
@@ -144,6 +146,8 @@ public class GameManager : MonoBehaviour
 
     public void RunEconomyTick()
     {
+        foodProducedLastTick = 0;
+
         // ─────────────────────────────────────
         // CLEAR FEEDBACK ICONS
         // ─────────────────────────────────────
@@ -409,7 +413,10 @@ public class GameManager : MonoBehaviour
                     {
                         int actual = Mathf.Min(farmOut, tile.tileData.resourceAmount);
                         if (inv.AddResource(ResourceType.Farming, actual))
+                        {
                             tile.tileData.resourceAmount -= actual;
+                            foodProducedLastTick += actual;
+                        }
                     }
                     break;
 
@@ -997,6 +1004,8 @@ public class GameManager : MonoBehaviour
     // ─────────────────────────────────────────
     void RunFoodTick()
     {
+        foodDemandLastTick = 0;
+
         if (population <= 0)
         {
             foodShortageCounter = 0;
@@ -1018,6 +1027,7 @@ public class GameManager : MonoBehaviour
             }
         }
 
+        foodDemandLastTick = residentialCount;
         int remaining = residentialCount; // food still needed this tick
 
         // ── CONSUME FROM INVENTORIES ─────────
