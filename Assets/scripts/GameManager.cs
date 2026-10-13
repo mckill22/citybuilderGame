@@ -99,6 +99,14 @@ public class GameManager : MonoBehaviour
     [HideInInspector] public int foodShortageCounter = 0;
     [HideInInspector] public bool isFamine = false;
 
+    [Header("Disease and Healthcare")]
+    [HideInInspector] public bool diseaseOutbreakActive;
+    [HideInInspector] public int diseaseOutbreakTicksRemaining;
+    private int lowHealthcareTicks;
+    private int diseaseCooldownTicks;
+    private const int DiseaseOutbreakDuration = 4;
+    private const int DiseaseCooldownDuration = 10;
+
     // ─── GAS SHORTAGE ────────────────────────
     public int gasShortageCounter = 0;
     public int gasShortageThreshold = 3;
@@ -520,22 +528,6 @@ public class GameManager : MonoBehaviour
                 population = maxPopulation;
         }
 
-        // ─────────────────────────────────────
-        // EPIDEMIC RISK
-        // Low healthcare + large population =
-        // random small pop loss each tick.
-        // ─────────────────────────────────────
-        if (healthcare < 20 && population > 300)
-        {
-            if (Random.value < 0.05f) // 5% chance per tick
-            {
-                int sick = Mathf.Max(1, Mathf.RoundToInt(population * 0.003f));
-                population = Mathf.Max(0, population - sick);
-                NewsManager.Post(NewsCategory.Health,
-                    "Disease Outbreak! Low healthcare is costing lives.");
-            }
-        }
-
         // CityManager is the single source of truth for city services and happiness.
         // Run it before legacy consequence systems so they read the latest capital values.
         if (CityManager.Instance != null && CityManager.Instance.gameStarted)
@@ -543,6 +535,38 @@ public class GameManager : MonoBehaviour
 
         if (HappinessManager.Instance != null)
             HappinessManager.Instance.RunHappinessTick();
+
+        // Healthcare consequences use the latest city-service value. Low healthcare
+        // must persist before an outbreak can start; news is posted once per outbreak.
+        if (diseaseCooldownTicks > 0) diseaseCooldownTicks--;
+
+        if (healthcare < 20 && population > 300)
+            lowHealthcareTicks++;
+        else
+            lowHealthcareTicks = Mathf.Max(0, lowHealthcareTicks - 1);
+
+        if (diseaseOutbreakActive)
+        {
+            int sick = Mathf.Max(1, Mathf.RoundToInt(population * 0.002f));
+            population = Mathf.Max(0, population - sick);
+            diseaseOutbreakTicksRemaining--;
+
+            if (diseaseOutbreakTicksRemaining <= 0)
+            {
+                diseaseOutbreakActive = false;
+                diseaseCooldownTicks = DiseaseCooldownDuration;
+                NewsManager.Post(NewsCategory.Health,
+                    "Disease outbreak contained. Improve healthcare to reduce future risk.");
+            }
+        }
+        else if (lowHealthcareTicks >= 3 && diseaseCooldownTicks <= 0 &&
+                 Random.value < 0.15f)
+        {
+            diseaseOutbreakActive = true;
+            diseaseOutbreakTicksRemaining = DiseaseOutbreakDuration;
+            NewsManager.Post(NewsCategory.Health,
+                "Disease outbreak! Healthcare has remained critically low. Population is at risk.");
+        }
 
         // Global crime remains responsible for district coverage, national crime events and theft.
         if (CrimeManager.Instance != null)
