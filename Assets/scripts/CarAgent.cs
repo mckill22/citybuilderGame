@@ -1,41 +1,30 @@
 using UnityEngine;
 using System.Collections.Generic;
 
-// =============================================
-// CAR AGENT
-// Cosmetic vehicle that follows road tiles
-// toward a district destination, then picks
-// a new one. Loops forever.
-//
-// Speed sync: movement scales with GameClock
-// speed multiplier. Freezes while paused.
-// Stuck detection is disabled while paused
-// to avoid false positives.
-// =============================================
+// Cosmetic vehicle. Road BFS buffers are reused between trips; unreachable
+// destinations are retried later rather than recursively searching forever.
 public class CarAgent : MonoBehaviour
 {
     [Header("Movement")]
-    public float baseMoveSpeed = 4f;    // speed at 1x (Normal)
-    public float rotateSpeed = 10f;
+    public float baseMoveSpeed = 4f;
+    public float rotateSpeed = 240f;
 
     [Header("Stuck Detection")]
     public float stuckTimeout = 3f;
     public float stuckMinMove = 0.1f;
 
-    // ─────────────────────────────────────────
     private GridManager grid;
     private TileObject currentTile;
     private TileObject destinationTile;
-
-    private List<TileObject> path = new List<TileObject>();
-    private int pathIndex = 0;
-
+    private readonly List<TileObject> path = new List<TileObject>();
+    private readonly Queue<TileObject> searchQueue = new Queue<TileObject>();
+    private readonly Dictionary<TileObject, TileObject> cameFrom =
+        new Dictionary<TileObject, TileObject>();
+    private int pathIndex;
     private Vector3 lastCheckedPos;
-    private float stuckTimer = 0f;
+    private float stuckTimer;
+    private float personalSpeed = 1f;
 
-    // ─────────────────────────────────────────
-    // Speed multipliers mirror GameClock exactly
-    // ─────────────────────────────────────────
     private static readonly float[] speedMultipliers = { 0f, 1f, 3f, 8f };
 
     float SpeedMultiplier
@@ -43,76 +32,62 @@ public class CarAgent : MonoBehaviour
         get
         {
             if (GameClock.Instance == null) return 1f;
-            return speedMultipliers[(int)GameClock.Instance.currentSpeed];
+            int index = Mathf.Clamp((int)GameClock.Instance.currentSpeed, 0, speedMultipliers.Length - 1);
+            return speedMultipliers[index];
         }
     }
 
-    bool IsPaused =>
-        GameClock.Instance != null &&
-        GameClock.Instance.currentSpeed == GameClock.GameSpeed.Paused;
+    bool IsPaused => GameClock.Instance != null &&
+                     GameClock.Instance.currentSpeed == GameClock.GameSpeed.Paused;
 
-    // =========================================
-    public void InitPath(
-        TileObject start,
-        TileObject target,
-        GridManager gm)
+    public void InitPath(TileObject start, TileObject target, GridManager gm)
     {
+        if (start == null || gm == null) return;
         grid = gm;
         currentTile = start;
         destinationTile = target;
-
-        transform.position =
-            start.transform.position + Vector3.up * 0.05f;
-
+        personalSpeed = Random.Range(0.9f, 1.1f);
+        transform.position = start.transform.position + Vector3.up * 0.05f;
         lastCheckedPos = transform.position;
-
-        BuildPath();
+        if (!BuildPath()) ScheduleDestinationRetry(1.5f);
     }
 
-    // =========================================
     void Update()
     {
-        // Freeze entirely while paused
-        if (IsPaused) return;
+        if (IsPaused || grid == null || pathIndex >= path.Count) return;
 
-        if (path == null || pathIndex >= path.Count)
-            return;
-
-        float currentSpeed = baseMoveSpeed * SpeedMultiplier;
-
+        float currentSpeed = baseMoveSpeed * personalSpeed * SpeedMultiplier;
         TileObject nextTile = path[pathIndex];
-        Vector3 targetPos =
-            nextTile.transform.position + Vector3.up * 0.05f;
-
-        // Move toward next tile
-        transform.position = Vector3.MoveTowards(
-            transform.position,
-            targetPos,
-            currentSpeed * Time.deltaTime);
-
-        // Smooth rotation toward movement direction
-        Vector3 dir = (targetPos - transform.position).normalized;
-        if (dir != Vector3.zero)
+        if (nextTile == null)
         {
-            transform.rotation = Quaternion.Lerp(
-                transform.rotation,
-                Quaternion.LookRotation(dir),
-                rotateSpeed * SpeedMultiplier * Time.deltaTime);
+            RecoverFromStuck();
+            return;
         }
 
-        // Reached tile
-        if (Vector3.Distance(transform.position, targetPos) < 0.05f)
+        Vector3 targetPos = nextTile.transform.position + Vector3.up * 0.05f;
+        Vector3 previousPosition = transform.position;
+        transform.position = Vector3.MoveTowards(
+            transform.position, targetPos, currentSpeed * Time.deltaTime);
+
+        Vector3 direction = targetPos - previousPosition;
+        direction.y = 0f;
+        if (direction.sqrMagnitude > 0.001f)
+            transform.rotation = Quaternion.RotateTowards(
+                transform.rotation, Quaternion.LookRotation(direction.normalized),
+                rotateSpeed * SpeedMultiplier * Time.deltaTime);
+
+        if ((transform.position - targetPos).sqrMagnitude < 0.0025f)
         {
             transform.position = targetPos;
             currentTile = nextTile;
             pathIndex++;
-
             if (pathIndex >= path.Count)
+            {
                 PickNewDestination();
+                return;
+            }
         }
 
-        // Stuck detection — only accumulate time when not paused
-        // (we already return early if paused, but guard is explicit)
         stuckTimer += Time.deltaTime;
         if (stuckTimer >= stuckTimeout)
         {
@@ -124,171 +99,142 @@ public class CarAgent : MonoBehaviour
         }
     }
 
-    // =========================================
-    // DESTINATION
-    // =========================================
-    void PickNewDestination()
+    void ScheduleDestinationRetry(float delay)
     {
-        List<TileObject> districts = grid.districtTiles;
-
-        if (districts == null || districts.Count < 2)
-            return;
-
-        TileObject dest = null;
-        int safety = 0;
-
-        while (safety < 20)
-        {
-            TileObject candidate =
-                districts[Random.Range(0, districts.Count)];
-
-            if (candidate != currentTile)
-            {
-                dest = candidate;
-                break;
-            }
-
-            safety++;
-        }
-
-        if (dest == null) return;
-
-        destinationTile = dest;
-        BuildPath();
+        CancelInvoke(nameof(PickNewDestination));
+        Invoke(nameof(PickNewDestination), delay);
     }
 
-    // =========================================
-    // BFS PATH — road tiles only
-    // =========================================
-    void BuildPath()
+    void PickNewDestination()
+    {
+        if (grid == null) return;
+        List<TileObject> districts = grid.districtTiles;
+        if (districts == null || districts.Count < 2)
+        {
+            ScheduleDestinationRetry(2f);
+            return;
+        }
+
+        for (int attempt = 0; attempt < 16; attempt++)
+        {
+            TileObject candidate = districts[Random.Range(0, districts.Count)];
+            if (candidate == null || candidate == currentTile) continue;
+            destinationTile = candidate;
+            if (BuildPath()) return;
+        }
+
+        ScheduleDestinationRetry(1.5f);
+    }
+
+    bool BuildPath()
     {
         path.Clear();
         pathIndex = 0;
+        if (grid == null || currentTile == null || destinationTile == null)
+            return false;
 
-        if (currentTile == null || destinationTile == null) return;
-
-        Queue<TileObject> queue = new Queue<TileObject>();
-        Dictionary<TileObject, TileObject> cameFrom =
-            new Dictionary<TileObject, TileObject>();
-
-        queue.Enqueue(currentTile);
+        searchQueue.Clear();
+        cameFrom.Clear();
+        searchQueue.Enqueue(currentTile);
         cameFrom[currentTile] = null;
-
         TileObject found = null;
 
-        while (queue.Count > 0)
+        while (searchQueue.Count > 0)
         {
-            TileObject cur = queue.Dequeue();
-
-            if (cur == destinationTile ||
-                IsAdjacentTo(cur, destinationTile))
+            TileObject current = searchQueue.Dequeue();
+            if (current == destinationTile || IsAdjacentTo(current, destinationTile))
             {
-                found = cur;
+                found = current;
                 break;
             }
 
-            foreach (TileObject n in GetRoadNeighbors(cur))
-            {
-                if (cameFrom.ContainsKey(n)) continue;
-                cameFrom[n] = cur;
-                queue.Enqueue(n);
-            }
+            Vector2Int p = current.gridPosition;
+            TryVisitRoad(p.x + 1, p.y, current);
+            TryVisitRoad(p.x - 1, p.y, current);
+            TryVisitRoad(p.x, p.y + 1, current);
+            TryVisitRoad(p.x, p.y - 1, current);
         }
 
-        if (found == null)
-        {
-            PickNewDestination();
-            return;
-        }
+        if (found == null) return false;
 
         TileObject step = found;
         while (step != null)
         {
             path.Add(step);
-            cameFrom.TryGetValue(step, out step);
+            if (!cameFrom.TryGetValue(step, out step))
+            {
+                path.Clear();
+                return false;
+            }
         }
         path.Reverse();
 
-        if (path.Count > 0 &&
-            path[path.Count - 1] != destinationTile)
+        if (path.Count > 0 && path[path.Count - 1] != destinationTile)
             path.Add(destinationTile);
+
+        lastCheckedPos = transform.position;
+        stuckTimer = 0f;
+        return path.Count > 0;
     }
 
-    // =========================================
-    // STUCK RECOVERY
-    // =========================================
+    void TryVisitRoad(int x, int z, TileObject parent)
+    {
+        TileObject next = grid.GetTileAt(x, z);
+        if (next == null || cameFrom.ContainsKey(next) || !next.HasRoad()) return;
+        cameFrom[next] = parent;
+        searchQueue.Enqueue(next);
+    }
+
     void RecoverFromStuck()
     {
         TileObject nearest = FindNearestRoadTile();
-        if (nearest == null) return;
+        if (nearest == null)
+        {
+            path.Clear();
+            pathIndex = 0;
+            ScheduleDestinationRetry(1.5f);
+            return;
+        }
 
         currentTile = nearest;
-        transform.position =
-            nearest.transform.position + Vector3.up * 0.05f;
-
+        transform.position = nearest.transform.position + Vector3.up * 0.05f;
         PickNewDestination();
     }
 
     TileObject FindNearestRoadTile()
     {
-        float minDist = float.MaxValue;
+        if (grid == null) return null;
+        float minDistance = float.MaxValue;
         TileObject nearest = null;
-
         Vector2Int center = currentTile != null
             ? currentTile.gridPosition
             : new Vector2Int(grid.width / 2, grid.height / 2);
-
-        int radius = 8;
+        const int radius = 8;
 
         for (int x = center.x - radius; x <= center.x + radius; x++)
+        for (int z = center.y - radius; z <= center.y + radius; z++)
         {
-            for (int z = center.y - radius; z <= center.y + radius; z++)
+            TileObject tile = grid.GetTileAt(x, z);
+            if (tile == null || !tile.HasRoad()) continue;
+            float distance = (transform.position - tile.transform.position).sqrMagnitude;
+            if (distance < minDistance)
             {
-                TileObject t = grid.GetTileAt(x, z);
-                if (t == null || !t.HasRoad()) continue;
-
-                float d = Vector3.Distance(
-                    transform.position,
-                    t.transform.position);
-
-                if (d < minDist)
-                {
-                    minDist = d;
-                    nearest = t;
-                }
+                minDistance = distance;
+                nearest = tile;
             }
         }
-
         return nearest;
-    }
-
-    // =========================================
-    // HELPERS
-    // =========================================
-    List<TileObject> GetRoadNeighbors(TileObject tile)
-    {
-        var list = new List<TileObject>(4);
-        TryAdd(tile, 1, 0, list);
-        TryAdd(tile, -1, 0, list);
-        TryAdd(tile, 0, 1, list);
-        TryAdd(tile, 0, -1, list);
-        return list;
-    }
-
-    void TryAdd(TileObject tile, int dx, int dz, List<TileObject> list)
-    {
-        TileObject n = grid.GetTileAt(
-            tile.gridPosition.x + dx,
-            tile.gridPosition.y + dz);
-
-        if (n != null && n.HasRoad())
-            list.Add(n);
     }
 
     bool IsAdjacentTo(TileObject a, TileObject b)
     {
         int dx = Mathf.Abs(a.gridPosition.x - b.gridPosition.x);
         int dz = Mathf.Abs(a.gridPosition.y - b.gridPosition.y);
-        return (dx + dz) == 1;
+        return dx + dz == 1;
+    }
+
+    void OnDisable()
+    {
+        CancelInvoke(nameof(PickNewDestination));
     }
 }
