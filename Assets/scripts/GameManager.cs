@@ -528,8 +528,11 @@ public class GameManager : MonoBehaviour
                 population = maxPopulation;
         }
 
-        // CityManager is the single source of truth for city services and happiness.
-        // Run it before legacy consequence systems so they read the latest capital values.
+        // Calculate district safety first. CityManager averages these same
+        // values for each city before happiness, tax, and population consequences run.
+        if (CrimeManager.Instance != null)
+            CrimeManager.Instance.RunCrimeTick();
+
         if (CityManager.Instance != null && CityManager.Instance.gameStarted)
             CityManager.Instance.RunCityTick();
 
@@ -567,10 +570,6 @@ public class GameManager : MonoBehaviour
             NewsManager.Post(NewsCategory.Health,
                 "Disease outbreak! Healthcare has remained critically low. Population is at risk.");
         }
-
-        // Global crime remains responsible for district coverage, national crime events and theft.
-        if (CrimeManager.Instance != null)
-            CrimeManager.Instance.RunCrimeTick();
 
         // Must run BEFORE RunFoodTick so farming total is current
         UpdateGlobalResourceTotals();
