@@ -64,6 +64,14 @@ public class CarAgent : MonoBehaviour
             return;
         }
 
+        // A road may be removed after path creation. Re-plan instead of
+        // driving over a disconnected tile; the destination itself needn't be road.
+        if (pathIndex > 0 && nextTile != destinationTile && !nextTile.HasRoad())
+        {
+            if (!BuildPath()) ScheduleDestinationRetry(1.5f);
+            return;
+        }
+
         Vector3 targetPos = nextTile.transform.position + Vector3.up * 0.05f;
         Vector3 previousPosition = transform.position;
         transform.position = Vector3.MoveTowards(
@@ -115,7 +123,7 @@ public class CarAgent : MonoBehaviour
             return;
         }
 
-        for (int attempt = 0; attempt < 16; attempt++)
+        for (int attempt = 0; attempt < 4; attempt++)
         {
             TileObject candidate = districts[Random.Range(0, districts.Count)];
             if (candidate == null || candidate == currentTile) continue;
