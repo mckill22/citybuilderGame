@@ -71,9 +71,6 @@ public class FoodInfoPanel : MonoBehaviour
 
         int homes = 0;
         int storedFood = 0;
-        int farmOutput = 0;
-        float eventMod = RandomEventManager.Instance != null
-            ? Mathf.Max(0f, RandomEventManager.Instance.FarmingModifier) : 1f;
 
         foreach (TileObject tile in grid.allTiles)
         {
@@ -86,15 +83,10 @@ public class FoodInfoPanel : MonoBehaviour
             if (inventory != null)
                 storedFood += Mathf.Max(0, inventory.GetResource(ResourceType.Farming));
 
-            if (tile.tileData.buildingType == BuildingType.Farm &&
-                tile.CurrentBuilding != null)
-            {
-                float productivity = gm.GetBuildingProductivity(tile);
-                farmOutput += Mathf.Max(0, Mathf.RoundToInt(5f * productivity * eventMod));
-            }
         }
 
-        int demand = homes; // The economy consumes one food per residential building per tick.
+        int farmOutput = Mathf.Max(0, gm.foodProducedLastTick);
+        int demand = Mathf.Max(0, gm.foodDemandLastTick);
         int available = storedFood + Mathf.Max(0, gm.foodStock);
         int net = farmOutput - demand;
         string netColor = net > 0 ? "#39C96B" : net == 0 ? "#E5B93D" : "#F28C38";
@@ -103,12 +95,12 @@ public class FoodInfoPanel : MonoBehaviour
             : available < Mathf.Max(1, demand * 8) ? "#E5B93D" : "#39C96B";
 
         Set(titleText, "FOOD");
-        Set(farmOutputText, $"Production / tick   <color=#39C96B><b>+{farmOutput}</b></color>");
+        Set(farmOutputText, $"Production / last tick   <color=#39C96B><b>+{farmOutput}</b></color>");
         Set(reserveText, $"Reserve              <b>{gm.foodStock}</b>");
         Set(totalAvailableText, $"Available now        <color={supplyColor}><b>{available}</b></color>");
         Set(populationText, $"Population           <b>{gm.population}</b>");
         Set(residentialText, $"Homes                <b>{homes}</b>");
-        Set(demandText, $"Consumption / tick   <b>{demand}</b>");
+        Set(demandText, $"Demand / last tick   <b>{demand}</b>");
         Set(surplusText, $"Net / tick            <color={netColor}><b>{(net > 0 ? "+" : "")}{net}</b></color>");
 
         int threshold = Mathf.Max(1, gm.foodShortageThreshold);
@@ -126,7 +118,7 @@ public class FoodInfoPanel : MonoBehaviour
         else if (net < 0)
             Set(statusText, "<color=#E5B93D><b>WATCH — Reserves are covering a production deficit.</b></color>");
         else
-            Set(statusText, "<color=#39C96B><b>STABLE — Production covers current demand.</b></color>");
+            Set(statusText, "<color=#39C96B><b>STABLE — Recent production covers demand.</b></color>");
     }
 
     void Set(TextMeshProUGUI field, string value)
