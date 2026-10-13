@@ -77,12 +77,18 @@ public class CarAgent : MonoBehaviour
         transform.position = Vector3.MoveTowards(
             transform.position, targetPos, currentSpeed * Time.deltaTime);
 
-        Vector3 direction = targetPos - previousPosition;
-        direction.y = 0f;
+        // Preserve the original CarAgent's proven facing behavior: calculate
+        // direction from the car's post-move position and smoothly Lerp toward it.
+        // This avoids the new RotateTowards behavior that changed vehicle turning.
+        Vector3 direction = targetPos - transform.position;
         if (direction.sqrMagnitude > 0.001f)
-            transform.rotation = Quaternion.RotateTowards(
-                transform.rotation, Quaternion.LookRotation(direction.normalized),
+        {
+            direction.Normalize();
+            transform.rotation = Quaternion.Lerp(
+                transform.rotation,
+                Quaternion.LookRotation(direction),
                 rotateSpeed * SpeedMultiplier * Time.deltaTime);
+        }
 
         if ((transform.position - targetPos).sqrMagnitude < 0.0025f)
         {
