@@ -20,6 +20,10 @@ public class CrimeManager : MonoBehaviour
 
     public void RunCrimeTick()
     {
+        if (GridManager.Instance == null || GridManager.Instance.allTiles == null ||
+            GameManager.Instance == null)
+            return;
+
         List<TileObject> allTiles = GridManager.Instance.allTiles;
 
         int totalCrime = 0;
@@ -49,7 +53,16 @@ public class CrimeManager : MonoBehaviour
 
             districtCount++;
 
-            float crime = Mathf.Max(0, 50 - GameManager.Instance.happiness) * 0.8f;
+            // Use the owning city's happiness where available, not the capital's
+            // national value, so district safety reflects local conditions.
+            int localHappiness = GameManager.Instance.happiness;
+            if (CityManager.Instance != null)
+            {
+                CityData owner = CityManager.Instance.GetCityAt(tile.gridPosition);
+                if (owner != null) localHappiness = owner.happiness;
+            }
+
+            float crime = Mathf.Max(0, 50 - localHappiness) * 0.8f;
             if (!tile.tileData.hasPoliceCoverage)
                 crime += 25f;
 
