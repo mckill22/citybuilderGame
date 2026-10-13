@@ -101,7 +101,7 @@ public class FoodInfoPanel : MonoBehaviour
         Set(populationText, $"Population           <b>{gm.population}</b>");
         Set(residentialText, $"Homes                <b>{homes}</b>");
         Set(demandText, $"Demand / last tick   <b>{demand}</b>");
-        Set(surplusText, $"Net / tick            <color={netColor}><b>{(net > 0 ? "+" : "")}{net}</b></color>");
+        Set(surplusText, $"Net / last tick       <color={netColor}><b>{(net > 0 ? "+" : "")}{net}</b></color>");
 
         int threshold = Mathf.Max(1, gm.foodShortageThreshold);
         string shortageColor = gm.foodShortageCounter <= 0 ? "#39C96B"
