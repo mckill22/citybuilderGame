@@ -45,6 +45,11 @@ public class CrimeManager : MonoBehaviour
             ApplyPoliceCoverage(tile);
         }
 
+        int eventCrimeModifier = RandomEventManager.Instance != null
+            ? RandomEventManager.Instance.CrimeModifier : 0;
+        int policyCrimeModifier = PolicyManager.Instance != null
+            ? PolicyManager.Instance.CrimeModifier : 0;
+
         // CALCULATE CRIME PER DISTRICT TILE
         foreach (TileObject tile in allTiles)
         {
@@ -66,7 +71,10 @@ public class CrimeManager : MonoBehaviour
             if (!tile.tileData.hasPoliceCoverage)
                 crime += 25f;
 
-            tile.tileData.crimeLevel = Mathf.Clamp(crime, 0, 100);
+            // Apply modifiers to district values so the city and national
+            // averages use the same scale as the crime map.
+            crime += eventCrimeModifier + policyCrimeModifier;
+            tile.tileData.crimeLevel = Mathf.Clamp(crime, 0f, 100f);
             totalCrime += Mathf.RoundToInt(tile.tileData.crimeLevel);
         }
 
@@ -74,16 +82,6 @@ public class CrimeManager : MonoBehaviour
         globalCrime = districtCount > 0
             ? (float)totalCrime / districtCount
             : 0f;
-
-        // Random event crime modifier (serial killer)
-        if (RandomEventManager.Instance != null)
-            globalCrime = Mathf.Clamp(
-                globalCrime + RandomEventManager.Instance.CrimeModifier, 0f, 100f);
-
-        // Policy crime modifier (martial law, open/closed borders)
-        if (PolicyManager.Instance != null)
-            globalCrime = Mathf.Clamp(
-                globalCrime + PolicyManager.Instance.CrimeModifier, 0f, 100f);
 
         // NEWS: crime crossing thresholds
         if (prevCrime < 70f && globalCrime >= 70f)
