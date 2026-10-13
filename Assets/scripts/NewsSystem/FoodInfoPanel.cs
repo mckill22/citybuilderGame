@@ -1,105 +1,54 @@
 using UnityEngine;
-using UnityEngine.UI;
 using TMPro;
 
-// =============================================
-// FOOD INFO PANEL
-// Opens when the player clicks the food icon
-// in the HUD. Shows a detailed breakdown of
-// food production, consumption, reserves, and
-// famine status.
-//
-// Unity setup:
-//   Attach to a panel GameObject.
-//   Wire all TMP fields in the Inspector.
-//   Call Toggle() from the food icon's
-//   onClick event.
-//
-// Panel layout suggestion:
-//   ┌─────────────────────────────┐
-//   │  🌾 Food Summary            │
-//   │─────────────────────────────│
-//   │  PRODUCTION                 │
-//   │  Farm output / tick:  +32   │
-//   │  Starting reserve:    480   │
-//   │  Total available:     512   │
-//   │─────────────────────────────│
-//   │  CONSUMPTION                │
-//   │  Population:          400   │
-//   │  Residential tiles:   16    │
-//   │  Food needed / tick:  16    │
-//   │─────────────────────────────│
-//   │  BALANCE                    │
-//   │  Surplus / tick:      +16   │
-//   │  Shortage ticks:      0/3   │
-//   │─────────────────────────────│
-//   │  STATUS:  ✓ Well fed        │
-//   └─────────────────────────────┘
-// =============================================
+// Compact food report. Values refresh when opened and on simulation ticks.
 public class FoodInfoPanel : MonoBehaviour
 {
     public static FoodInfoPanel Instance;
 
     [Header("Panel Root")]
     public GameObject panel;
-
     [Header("Header")]
     public TextMeshProUGUI titleText;
-
     [Header("Production")]
-    public TextMeshProUGUI farmOutputText;    // "Farm output / tick:  +32"
-    public TextMeshProUGUI reserveText;       // "Starting reserve:  480"
-    public TextMeshProUGUI totalAvailableText;// "Total available:  512"
-
+    public TextMeshProUGUI farmOutputText;
+    public TextMeshProUGUI reserveText;
+    public TextMeshProUGUI totalAvailableText;
     [Header("Consumption")]
-    public TextMeshProUGUI populationText;    // "Population:  400"
-    public TextMeshProUGUI residentialText;   // "Residential tiles:  16"
-    public TextMeshProUGUI demandText;        // "Food needed / tick:  16"
-
+    public TextMeshProUGUI populationText;
+    public TextMeshProUGUI residentialText;
+    public TextMeshProUGUI demandText;
     [Header("Balance")]
-    public TextMeshProUGUI surplusText;       // "Surplus / tick:  +16"
-    public TextMeshProUGUI shortageTicksText; // "Shortage ticks:  0 / 3"
-
+    public TextMeshProUGUI surplusText;
+    public TextMeshProUGUI shortageTicksText;
     [Header("Status")]
-    public TextMeshProUGUI statusText;        // "✓ Well fed" / "⚠ Famine!"
+    public TextMeshProUGUI statusText;
 
-    private bool isOpen = false;
+    private bool isOpen;
 
     void Awake() { Instance = this; }
 
     void Start()
     {
         if (panel != null) panel.SetActive(false);
-
-        if (GameClock.Instance != null)
-            GameClock.Instance.OnTick += OnTick;
+        if (GameClock.Instance != null) GameClock.Instance.OnTick += OnTick;
     }
 
     void OnDestroy()
     {
-        if (GameClock.Instance != null)
-            GameClock.Instance.OnTick -= OnTick;
+        if (GameClock.Instance != null) GameClock.Instance.OnTick -= OnTick;
+        if (Instance == this) Instance = null;
     }
 
     void Update()
     {
-        if (!isOpen) return;
-        if (Input.GetKeyDown(KeyCode.Escape) ||
-            Input.GetMouseButtonDown(1))
+        if (isOpen && (Input.GetKeyDown(KeyCode.Escape) || Input.GetMouseButtonDown(1)))
             Close();
     }
 
-    void OnTick()
-    {
-        if (isOpen) Refresh();
-    }
+    void OnTick() { if (isOpen) Refresh(); }
 
-    // =========================================
-    public void Toggle()
-    {
-        if (isOpen) Close();
-        else Open();
-    }
+    public void Toggle() { if (isOpen) Close(); else Open(); }
 
     public void Open()
     {
@@ -114,127 +63,66 @@ public class FoodInfoPanel : MonoBehaviour
         if (panel != null) panel.SetActive(false);
     }
 
-    // =========================================
-    // REFRESH
-    // =========================================
     void Refresh()
     {
-        if (GameManager.Instance == null) return;
-        var gm = GameManager.Instance;
+        GameManager gm = GameManager.Instance;
+        GridManager grid = GridManager.Instance;
+        if (gm == null || grid == null || grid.allTiles == null) return;
 
-        // ── COUNT FARMS AND RESIDENTIALS ─────
-        int residentialCount = 0;
-        int farmOutputPerTick = 0;
+        int homes = 0;
+        int storedFood = 0;
 
-        foreach (var tile in GridManager.Instance.allTiles)
+        foreach (TileObject tile in grid.allTiles)
         {
             if (tile == null || tile.tileData == null) continue;
 
             if (tile.tileData.buildingType == BuildingType.Residential)
-                residentialCount++;
+                homes++;
 
-            if (tile.tileData.buildingType == BuildingType.Farm &&
-                tile.CurrentBuilding != null)
-            {
-                // Estimate farm output using productivity
-                float prod = gm.GetBuildingProductivity(tile);
-                float eventMod = RandomEventManager.Instance != null
-                    ? RandomEventManager.Instance.FarmingModifier : 1f;
-                farmOutputPerTick += Mathf.RoundToInt(5 * prod * eventMod);
-            }
+            BuildingInventory inventory = tile.buildingInventory;
+            if (inventory != null)
+                storedFood += Mathf.Max(0, inventory.GetResource(ResourceType.Farming));
+
         }
 
-        int foodDemandPerTick = residentialCount;
-        int totalAvailable = gm.farming; // already includes foodStock
-        int surplus = farmOutputPerTick - foodDemandPerTick;
+        int farmOutput = Mathf.Max(0, gm.foodProducedLastTick);
+        int demand = Mathf.Max(0, gm.foodDemandLastTick);
+        int available = storedFood + Mathf.Max(0, gm.foodStock);
+        int net = farmOutput - demand;
+        string netColor = net > 0 ? "#39C96B" : net == 0 ? "#E5B93D" : "#F28C38";
+        string supplyColor = available <= 0 ? "#E04F5F"
+            : available < Mathf.Max(1, demand * 3) ? "#F28C38"
+            : available < Mathf.Max(1, demand * 8) ? "#E5B93D" : "#39C96B";
 
-        // ── TITLE ────────────────────────────
-        if (titleText != null)
-            titleText.text = "Food Summary";
+        Set(titleText, "FOOD");
+        Set(farmOutputText, $"Production / last tick   <color=#39C96B><b>+{farmOutput}</b></color>");
+        Set(reserveText, $"Reserve              <b>{gm.foodStock}</b>");
+        Set(totalAvailableText, $"Available now        <color={supplyColor}><b>{available}</b></color>");
+        Set(populationText, $"Population           <b>{gm.population}</b>");
+        Set(residentialText, $"Homes                <b>{homes}</b>");
+        Set(demandText, $"Demand / last tick   <b>{demand}</b>");
+        Set(surplusText, $"Net / last tick       <color={netColor}><b>{(net > 0 ? "+" : "")}{net}</b></color>");
 
-        // ── PRODUCTION ───────────────────────
-        if (farmOutputText != null)
-        {
-            string droughtNote =
-                RandomEventManager.Instance != null &&
-                RandomEventManager.Instance.FarmingModifier < 1f
-                    ? " <color=#ff8800>(drought -50%)</color>"
-                    : "";
-            farmOutputText.text =
-                $"Farm output / tick:  <b>+{farmOutputPerTick}</b>{droughtNote}";
-        }
+        int threshold = Mathf.Max(1, gm.foodShortageThreshold);
+        string shortageColor = gm.foodShortageCounter <= 0 ? "#39C96B"
+            : gm.foodShortageCounter >= threshold - 1 ? "#E04F5F" : "#F28C38";
+        Set(shortageTicksText,
+            $"Shortage              <color={shortageColor}><b>{gm.foodShortageCounter}/{threshold}</b></color>");
 
-        if (reserveText != null)
-            reserveText.text =
-                $"Starting reserve:  <b>{gm.foodStock}</b>";
+        if (gm.isFamine)
+            Set(statusText, "<color=#E04F5F><b>CRITICAL — Famine is reducing population.</b></color>");
+        else if (gm.foodShortageCounter > 0)
+            Set(statusText, $"<color=#F28C38><b>WARNING — Food shortage. {Mathf.Max(0, threshold - gm.foodShortageCounter)} tick(s) until famine.</b></color>");
+        else if (available <= demand || (net < 0 && available < demand * 5))
+            Set(statusText, "<color=#E5B93D><b>LOW — Food reserves need attention.</b></color>");
+        else if (net < 0)
+            Set(statusText, "<color=#E5B93D><b>WATCH — Reserves are covering a production deficit.</b></color>");
+        else
+            Set(statusText, "<color=#39C96B><b>STABLE — Recent production covers demand.</b></color>");
+    }
 
-        if (totalAvailableText != null)
-        {
-            string availColor = totalAvailable > foodDemandPerTick * 10
-                ? "#00dd00" : totalAvailable > 0 ? "#ffdd00" : "#ff4444";
-            totalAvailableText.text =
-                $"Total in storage:  " +
-                $"<color={availColor}><b>{totalAvailable}</b></color>";
-        }
-
-        // ── CONSUMPTION ──────────────────────
-        if (populationText != null)
-            populationText.text =
-                $"Population:  <b>{gm.population}</b>";
-
-        if (residentialText != null)
-            residentialText.text =
-                $"Residential buildings:  <b>{residentialCount}</b>";
-
-        if (demandText != null)
-            demandText.text =
-                $"Food consumed / tick:  <b>{foodDemandPerTick}</b>";
-
-        // ── BALANCE ──────────────────────────
-        if (surplusText != null)
-        {
-            string sign = surplus >= 0 ? "+" : "";
-            string surplusColor = surplus >= 0 ? "#00dd00" : "#ff4444";
-            surplusText.text =
-                $"Net / tick:  " +
-                $"<color={surplusColor}><b>{sign}{surplus}</b></color>";
-        }
-
-        if (shortageTicksText != null)
-        {
-            string shortColor = gm.foodShortageCounter == 0
-                ? "#00dd00" : "#ff8800";
-            shortageTicksText.text =
-                $"Shortage ticks:  " +
-                $"<color={shortColor}><b>" +
-                $"{gm.foodShortageCounter} / {gm.foodShortageThreshold}" +
-                $"</b></color>";
-        }
-
-        // ── STATUS ───────────────────────────
-        if (statusText != null)
-        {
-            if (gm.isFamine)
-                statusText.text =
-                    "<color=#ff4444><b>☠ FAMINE ACTIVE — Population declining!</b></color>";
-            else if (gm.foodShortageCounter > 0)
-                statusText.text =
-                    $"<color=#ff8800><b>⚠ Food shortage! " +
-                    $"Famine in {gm.foodShortageThreshold - gm.foodShortageCounter}" +
-                    $" more ticks.</b></color>";
-            else if (surplus <= 0 && gm.foodStock <= 0)
-                statusText.text =
-                    "<color=#ffdd00><b>⚠ Breaking even. " +
-                    "Build more farms.</b></color>";
-            else if (surplus <= 0 && gm.foodStock > 0)
-                statusText.text =
-                    $"<color=#ffdd00><b>⚠ Farms can't keep up. " +
-                    $"Reserve covers ~{gm.foodStock / Mathf.Max(1, -surplus)} ticks." +
-                    $"</b></color>";
-            else
-                statusText.text =
-                    "<color=#00dd00><b>✓ Well fed. " +
-                    "Food supply is healthy.</b></color>";
-        }
+    void Set(TextMeshProUGUI field, string value)
+    {
+        if (field != null) field.text = value;
     }
 }

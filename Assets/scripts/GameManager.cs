@@ -50,6 +50,8 @@ public class GameManager : MonoBehaviour
     public int startingFreeTrucks = 25;
     public int startingFood = 500;          // set in Inspector — consumed over time
     [HideInInspector] public int foodStock; // runtime depleting stock
+    [HideInInspector] public int foodProducedLastTick;
+    [HideInInspector] public int foodDemandLastTick;
     public int startingGas = 1000;
     [HideInInspector] public int gasStock;
 
@@ -99,6 +101,14 @@ public class GameManager : MonoBehaviour
     [HideInInspector] public int foodShortageCounter = 0;
     [HideInInspector] public bool isFamine = false;
 
+    [Header("Disease and Healthcare")]
+    [HideInInspector] public bool diseaseOutbreakActive;
+    [HideInInspector] public int diseaseOutbreakTicksRemaining;
+    private int lowHealthcareTicks;
+    private int diseaseCooldownTicks;
+    private const int DiseaseOutbreakDuration = 4;
+    private const int DiseaseCooldownDuration = 10;
+
     // ─── GAS SHORTAGE ────────────────────────
     public int gasShortageCounter = 0;
     public int gasShortageThreshold = 3;
@@ -136,6 +146,8 @@ public class GameManager : MonoBehaviour
 
     public void RunEconomyTick()
     {
+        foodProducedLastTick = 0;
+
         // ─────────────────────────────────────
         // CLEAR FEEDBACK ICONS
         // ─────────────────────────────────────
@@ -401,7 +413,10 @@ public class GameManager : MonoBehaviour
                     {
                         int actual = Mathf.Min(farmOut, tile.tileData.resourceAmount);
                         if (inv.AddResource(ResourceType.Farming, actual))
+                        {
                             tile.tileData.resourceAmount -= actual;
+                            foodProducedLastTick += actual;
+                        }
                     }
                     break;
 
@@ -520,32 +535,48 @@ public class GameManager : MonoBehaviour
                 population = maxPopulation;
         }
 
-        // ─────────────────────────────────────
-        // EPIDEMIC RISK
-        // Low healthcare + large population =
-        // random small pop loss each tick.
-        // ─────────────────────────────────────
-        if (healthcare < 20 && population > 300)
-        {
-            if (Random.value < 0.05f) // 5% chance per tick
-            {
-                int sick = Mathf.Max(1, Mathf.RoundToInt(population * 0.003f));
-                population = Mathf.Max(0, population - sick);
-                NewsManager.Post(NewsCategory.Health,
-                    "Disease Outbreak! Low healthcare is costing lives.");
-            }
-        }
-
+        // Calculate district safety first. CityManager averages these same
+        // values for each city before happiness, tax, and population consequences run.
         if (CrimeManager.Instance != null)
             CrimeManager.Instance.RunCrimeTick();
-
-        if (HappinessManager.Instance != null)
-            HappinessManager.Instance.RunHappinessTick();
 
         if (CityManager.Instance != null && CityManager.Instance.gameStarted)
             CityManager.Instance.RunCityTick();
 
-        RunCityServices();
+        if (HappinessManager.Instance != null)
+            HappinessManager.Instance.RunHappinessTick();
+
+        // Healthcare consequences use the latest city-service value. Low healthcare
+        // must persist before an outbreak can start; news is posted once per outbreak.
+        if (diseaseCooldownTicks > 0) diseaseCooldownTicks--;
+
+        if (healthcare < 20 && population > 300)
+            lowHealthcareTicks++;
+        else
+            lowHealthcareTicks = Mathf.Max(0, lowHealthcareTicks - 1);
+
+        if (diseaseOutbreakActive)
+        {
+            int sick = Mathf.Max(1, Mathf.RoundToInt(population * 0.002f));
+            population = Mathf.Max(0, population - sick);
+            diseaseOutbreakTicksRemaining--;
+
+            if (diseaseOutbreakTicksRemaining <= 0)
+            {
+                diseaseOutbreakActive = false;
+                diseaseCooldownTicks = DiseaseCooldownDuration;
+                NewsManager.Post(NewsCategory.Health,
+                    "Disease outbreak contained. Improve healthcare to reduce future risk.");
+            }
+        }
+        else if (lowHealthcareTicks >= 3 && diseaseCooldownTicks <= 0 &&
+                 Random.value < 0.15f)
+        {
+            diseaseOutbreakActive = true;
+            diseaseOutbreakTicksRemaining = DiseaseOutbreakDuration;
+            NewsManager.Post(NewsCategory.Health,
+                "Disease outbreak! Healthcare has remained critically low. Population is at risk.");
+        }
 
         // Must run BEFORE RunFoodTick so farming total is current
         UpdateGlobalResourceTotals();
@@ -566,63 +597,6 @@ public class GameManager : MonoBehaviour
         gasoline += gasStock;
 
         ApplyPopulationAndWorkforceDecay();
-    }
-
-    // ─────────────────────────────────────────
-    // CITY SERVICES
-    // ─────────────────────────────────────────
-    void RunCityServices()
-    {
-        List<TileObject> allTiles = GridManager.Instance.allTiles;
-
-        int hospitals = 0, colleges = 0, policeStations = 0;
-
-        foreach (var tile in allTiles)
-        {
-            if (tile == null || tile.tileData == null) continue;
-            switch (tile.tileData.buildingType)
-            {
-                case BuildingType.Hospital:
-                    if (tile.isFunded) hospitals++;
-                    break;
-                case BuildingType.CollegeCampus:
-                    if (tile.isFunded) colleges++;
-                    break;
-                case BuildingType.PoliceStation:
-                    if (tile.isFunded) policeStations++;
-                    break;
-            }
-        }
-
-        if (population <= 0)
-        {
-            healthcare = 0;
-            education = 0;
-            crime = 0;
-            return;
-        }
-
-        int healthcareScore = hospitals * 20
-            - Mathf.Max(0, population / 200 - hospitals) * 10;
-        healthcare = Mathf.Clamp(healthcareScore, 0, 100);
-
-        int educationScore = colleges * 20
-            - Mathf.Max(0, population / 250 - colleges) * 10;
-        education = Mathf.Clamp(educationScore, 0, 100);
-
-        int crimeScore = population / 100
-            - policeStations * 20
-            + Mathf.Max(0, 50 - happiness) / 5;
-        crime = Mathf.Clamp(crimeScore, 0, 100);
-
-        if (population > 100)
-        {
-            happiness += Mathf.RoundToInt(
-                healthcare * 0.02f + education * 0.015f - crime * 0.03f);
-            happiness = Mathf.Clamp(happiness, 0, 100);
-            if (HappinessManager.Instance != null)
-                HappinessManager.Instance.happiness = happiness;
-        }
     }
 
     // ─────────────────────────────────────────
@@ -1030,6 +1004,8 @@ public class GameManager : MonoBehaviour
     // ─────────────────────────────────────────
     void RunFoodTick()
     {
+        foodDemandLastTick = 0;
+
         if (population <= 0)
         {
             foodShortageCounter = 0;
@@ -1051,6 +1027,7 @@ public class GameManager : MonoBehaviour
             }
         }
 
+        foodDemandLastTick = residentialCount;
         int remaining = residentialCount; // food still needed this tick
 
         // ── CONSUME FROM INVENTORIES ─────────

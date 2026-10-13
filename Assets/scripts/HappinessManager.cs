@@ -32,6 +32,7 @@ public class HappinessManager : MonoBehaviour
     public int healthcareBonus;
     public int educationBonus;
     public int crimePenalty;
+    public int otherFactorsBonus;
 
     // ─────────────────────────────────────────
     // STRIKE SYSTEM
@@ -65,12 +66,21 @@ public class HappinessManager : MonoBehaviour
     // =========================================
     public void RunHappinessTick()
     {
-        CalculateCrime();
-        CalculateHappiness();
+        if (GameManager.Instance == null || CityManager.Instance == null)
+            return;
 
-        if (GameManager.Instance.population <= 100)
+        CityData capital = CityManager.Instance.Capital;
+        if (capital == null)
+            return;
+
+        // CityManager owns the actual calculation. This manager only runs
+        // country-level consequences that still use the legacy population model.
+        happiness = capital.happiness;
+        crimeRate = capital.crime;
+        GameManager.Instance.happiness = capital.happiness;
+
+        if (capital.population <= 100)
         {
-            // Reset counters in early game
             unhappyTickCounter = 0;
             strikeActive = false;
             strikeTicksRemaining = 0;
@@ -80,33 +90,6 @@ public class HappinessManager : MonoBehaviour
             return;
         }
 
-        // POST-LOCK modifiers
-        if (CrimeManager.Instance != null)
-            happiness -= Mathf.RoundToInt(CrimeManager.Instance.globalCrime * 0.1f);
-
-        // Count funded hospitals and colleges
-        List<TileObject> allTiles = GridManager.Instance.allTiles;
-        int hospitals = 0, colleges = 0;
-        foreach (TileObject tile in allTiles)
-        {
-            if (tile == null || tile.tileData == null) continue;
-            switch (tile.tileData.buildingType)
-            {
-                case BuildingType.Hospital:
-                    if (tile.isFunded) hospitals++;
-                    break;
-                case BuildingType.CollegeCampus:
-                    if (tile.isFunded) colleges++;
-                    break;
-            }
-        }
-
-        happiness += hospitals * 2;
-        happiness += colleges * 3;
-        happiness = Mathf.Clamp(happiness, 0, 100);
-        GameManager.Instance.happiness = happiness;
-
-        // ── THRESHOLD CONSEQUENCES ──────────
         ApplyHappinessThresholdBonus();
         UpdateStrikeSystem();
         UpdatePopulationFlight();
