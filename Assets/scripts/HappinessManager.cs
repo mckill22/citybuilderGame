@@ -32,6 +32,7 @@ public class HappinessManager : MonoBehaviour
     public int healthcareBonus;
     public int educationBonus;
     public int crimePenalty;
+    public int otherFactorsBonus;
 
     // ─────────────────────────────────────────
     // STRIKE SYSTEM
