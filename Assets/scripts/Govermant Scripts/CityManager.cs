@@ -240,8 +240,9 @@ public class CityManager : MonoBehaviour
         // Count residential capacity inside this city's border
         int residentialCap = 0;
 
-        TileObject[] allTiles =
-            FindObjectsOfType<TileObject>();
+        List<TileObject> allTiles = GridManager.Instance != null
+            ? GridManager.Instance.allTiles : null;
+        if (allTiles == null) return;
 
         foreach (var tile in allTiles)
         {
@@ -313,9 +314,12 @@ public class CityManager : MonoBehaviour
         int colleges = 0;
         int policeStations = 0;
         int residentials = 0;
+        int cityCrimeTotal = 0;
+        int cityDistrictCount = 0;
 
-        TileObject[] allTiles =
-            FindObjectsOfType<TileObject>();
+        List<TileObject> allTiles = GridManager.Instance != null
+            ? GridManager.Instance.allTiles : null;
+        if (allTiles == null) return;
 
         foreach (var tile in allTiles)
         {
@@ -324,6 +328,12 @@ public class CityManager : MonoBehaviour
 
             if (tile.tileData.cityId != city.cityId)
                 continue;
+
+            if (tile.HasDistrict())
+            {
+                cityCrimeTotal += Mathf.RoundToInt(tile.tileData.crimeLevel);
+                cityDistrictCount++;
+            }
 
             switch (tile.tileData.buildingType)
             {
@@ -375,17 +385,19 @@ public class CityManager : MonoBehaviour
         {
             city.crime = 0;
         }
+        else if (cityDistrictCount > 0)
+        {
+            // City crime uses the same district values as the crime map.
+            city.crime = Mathf.Clamp(
+                Mathf.RoundToInt((float)cityCrimeTotal / cityDistrictCount), 0, 100);
+        }
         else
         {
             int policyCrimeModifier = PolicyManager.Instance != null
                 ? PolicyManager.Instance.CrimeModifier : 0;
-
-            int crimeScore = pop / 100
-                - policeStations * 20
+            int crimeScore = pop / 100 - policeStations * 20
                 + Mathf.Max(0, 50 - city.happiness) / 5
-                + cfg.crimeBaseline
-                + policyCrimeModifier;
-
+                + cfg.crimeBaseline + policyCrimeModifier;
             city.crime = Mathf.Clamp(crimeScore, 0, 100);
         }
 
