@@ -45,9 +45,16 @@ public class TruckAgent : MonoBehaviour
             yield return StartCoroutine(DriveToTile(route.source));
             bool reachedSource = driveSuccess;
 
-
-            if (!reachedSource || route == null || !route.active)
+            if (route == null || !route.active)
                 break;
+
+            // Temporary road block or disconnected network: retry later instead
+            // of silently terminating this truck's route coroutine.
+            if (!reachedSource)
+            {
+                yield return new WaitForSeconds(2f);
+                continue;
+            }
 
             // --- Load ---
             state = TruckState.Loading;
@@ -62,8 +69,15 @@ public class TruckAgent : MonoBehaviour
 
             // --- Drive to Destination ---
             state = TruckState.DrivingToDestination;
-            yield return StartCoroutine(DriveToTile(route.destination));
-            bool reachedDest = driveSuccess;
+            bool reachedDest = false;
+            while (isActive && route != null && route.active &&
+                   cargoAmount > 0 && !reachedDest)
+            {
+                yield return StartCoroutine(DriveToTile(route.destination));
+                reachedDest = driveSuccess;
+                if (!reachedDest && route != null && route.active)
+                    yield return new WaitForSeconds(2f);
+            }
 
             if (!reachedDest || route == null || !route.active)
                 break;
@@ -233,14 +247,11 @@ public class TruckAgent : MonoBehaviour
                 break;
             }
 
-            foreach (TileObject neighbor in GetNeighbors(current))
-            {
-                if (cameFrom.ContainsKey(neighbor)) continue;
-                if (!neighbor.HasRoad() && neighbor != goal) continue;
-
-                cameFrom[neighbor] = current;
-                queue.Enqueue(neighbor);
-            }
+            Vector2Int p = current.gridPosition;
+            TryVisitRoadNeighbor(p.x + 1, p.y, current, goal, queue, cameFrom);
+            TryVisitRoadNeighbor(p.x - 1, p.y, current, goal, queue, cameFrom);
+            TryVisitRoadNeighbor(p.x, p.y + 1, current, goal, queue, cameFrom);
+            TryVisitRoadNeighbor(p.x, p.y - 1, current, goal, queue, cameFrom);
         }
 
         if (found == null) return null;
@@ -271,20 +282,16 @@ public class TruckAgent : MonoBehaviour
         return (dx + dz) == 1;
     }
 
-    List<TileObject> GetNeighbors(TileObject tile)
+    void TryVisitRoadNeighbor(
+        int x, int z, TileObject parent, TileObject goal,
+        Queue<TileObject> queue, Dictionary<TileObject, TileObject> cameFrom)
     {
-        var list = new List<TileObject>();
-        TryAddNeighbor(tile, 1, 0, list);
-        TryAddNeighbor(tile, -1, 0, list);
-        TryAddNeighbor(tile, 0, 1, list);
-        TryAddNeighbor(tile, 0, -1, list);
-        return list;
-    }
+        TileObject neighbor = grid.GetTileAt(x, z);
+        if (neighbor == null || cameFrom.ContainsKey(neighbor)) return;
+        if (!neighbor.HasRoad() && neighbor != goal) return;
 
-    void TryAddNeighbor(TileObject tile, int dx, int dz, List<TileObject> list)
-    {
-        TileObject n = grid.GetTileAt(tile.gridPosition.x + dx, tile.gridPosition.y + dz);
-        if (n != null) list.Add(n);
+        cameFrom[neighbor] = parent;
+        queue.Enqueue(neighbor);
     }
 
     TileObject FindNearestRoadTile(Vector3 worldPos)
