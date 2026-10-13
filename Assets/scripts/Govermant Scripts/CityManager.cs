@@ -246,6 +246,9 @@ public class CityManager : MonoBehaviour
 
         foreach (var tile in allTiles)
         {
+            if (tile == null || tile.tileData == null)
+                continue;
+
             if (tile.tileData.cityId != city.cityId)
                 continue;
 
