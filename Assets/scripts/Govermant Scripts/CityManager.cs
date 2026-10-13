@@ -392,14 +392,26 @@ public class CityManager : MonoBehaviour
         // ── HAPPINESS ───────────────────────────
         if (pop <= 100)
         {
-            // Early game lock
-            city.happiness = Mathf.Max(
-                50,
-                50 + cfg.happinessBaseline);
+            // Keep the report breakdown synchronized even during the early-game floor.
+            city.happiness = Mathf.Max(50, 50 + cfg.happinessBaseline);
+            if (city.isCapital && HappinessManager.Instance != null)
+            {
+                HappinessManager.Instance.civilianGoodsBonus = 0;
+                HappinessManager.Instance.electricityBonus = 0;
+                HappinessManager.Instance.healthcareBonus = 0;
+                HappinessManager.Instance.educationBonus = 0;
+                HappinessManager.Instance.crimePenalty = 0;
+            }
+            prevCityHappiness[city.cityId] = city.happiness;
             return;
         }
 
         int h = 50 + cfg.happinessBaseline;
+        int goodsBonus = 0;
+        int powerBonus = 0;
+        int healthcareBonus = 0;
+        int educationBonus = 0;
+        int crimePenalty = Mathf.RoundToInt(city.crime * 0.25f);
 
         // Civilian goods — flow-based, matches HappinessManager.
         // No penalty until pop > 400.
@@ -407,24 +419,25 @@ public class CityManager : MonoBehaviour
         int demand = GameManager.Instance.monthlyGoodsDemand;
 
         if (demand <= 0)
-        { if (pop > 400) h -= 5; }
+        {
+            if (pop > 400) goodsBonus = -5;
+        }
         else
         {
             float salesRatio = Mathf.Clamp((float)sold / demand, 0f, 1.5f);
-            if (salesRatio < 0.2f) h -= 12;
-            else if (salesRatio < 0.5f) h -= 6;
-            else if (salesRatio < 0.8f) h -= 2;
-            else if (salesRatio < 1.0f) h += 6;
-            else if (salesRatio < 1.3f) h += 12;
-            else h += 18;
+            if (salesRatio < 0.2f) goodsBonus = -12;
+            else if (salesRatio < 0.5f) goodsBonus = -6;
+            else if (salesRatio < 0.8f) goodsBonus = -2;
+            else if (salesRatio < 1.0f) goodsBonus = 6;
+            else if (salesRatio < 1.3f) goodsBonus = 12;
+            else goodsBonus = 18;
         }
+        h += goodsBonus;
 
         // Power
-        if (GameManager.Instance.powerProduced >=
-            GameManager.Instance.powerConsumed)
-            h += 10;
-        else
-            h -= 8;
+        powerBonus = GameManager.Instance.powerProduced >=
+                     GameManager.Instance.powerConsumed ? 10 : -8;
+        h += powerBonus;
 
         // Healthcare — uses PolicyManager coverage
         int hCov = PolicyManager.Instance != null
@@ -432,12 +445,15 @@ public class CityManager : MonoBehaviour
         float sEff = PolicyManager.Instance != null
             ? PolicyManager.Instance.ServiceEffectivenessModifier : 1f;
         if (hospitals == 0)
-        { if (pop > 400) h -= 15; }
+        {
+            if (pop > 400) healthcareBonus = -15;
+        }
         else
         {
             float hcov = Mathf.Clamp01((float)(hospitals * hCov) / pop);
-            h += Mathf.RoundToInt(Mathf.Lerp(0f, 22f * sEff, hcov));
+            healthcareBonus = Mathf.RoundToInt(Mathf.Lerp(0f, 22f * sEff, hcov));
         }
+        h += healthcareBonus;
 
         // Education — uses PolicyManager coverage
         int eCov = PolicyManager.Instance != null
@@ -445,15 +461,18 @@ public class CityManager : MonoBehaviour
         float eEff = PolicyManager.Instance != null
             ? PolicyManager.Instance.EducationEffectivenessModifier : 1f;
         if (colleges == 0)
-        { if (pop > 500) h -= 10; }
+        {
+            if (pop > 500) educationBonus = -10;
+        }
         else
         {
             float ecov = Mathf.Clamp01((float)(colleges * eCov) / pop);
-            h += Mathf.RoundToInt(Mathf.Lerp(0f, 18f * sEff * eEff, ecov));
+            educationBonus = Mathf.RoundToInt(Mathf.Lerp(0f, 18f * sEff * eEff, ecov));
         }
+        h += educationBonus;
 
         // Crime
-        h -= Mathf.RoundToInt(city.crime * 0.25f);
+        h -= crimePenalty;
 
         // Random events and fuel availability affect every city's residents.
         if (RandomEventManager.Instance != null)
@@ -469,10 +488,18 @@ public class CityManager : MonoBehaviour
             h += PolicyManager.Instance.HappinessModifier;
 
         // Government happiness floor
-        city.happiness = Mathf.Clamp(
-            h,
-            cfg.happinessFloor,
-            100);
+        city.happiness = Mathf.Clamp(h, cfg.happinessFloor, 100);
+
+        // The happiness panel reads the exact modifiers used by the capital calculation.
+        if (city.isCapital && HappinessManager.Instance != null)
+        {
+            HappinessManager.Instance.civilianGoodsBonus = goodsBonus;
+            HappinessManager.Instance.electricityBonus = powerBonus;
+            HappinessManager.Instance.healthcareBonus = healthcareBonus;
+            HappinessManager.Instance.educationBonus = educationBonus;
+            HappinessManager.Instance.crimePenalty = crimePenalty;
+            HappinessManager.Instance.crimeRate = city.crime;
+        }
 
         // ── THRESHOLD CROSSING NEWS ──────────
         // Post to news when city happiness crosses
