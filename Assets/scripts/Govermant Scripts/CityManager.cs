@@ -416,6 +416,7 @@ public class CityManager : MonoBehaviour
                 HappinessManager.Instance.healthcareBonus = 0;
                 HappinessManager.Instance.educationBonus = 0;
                 HappinessManager.Instance.crimePenalty = 0;
+                HappinessManager.Instance.otherFactorsBonus = city.happiness - 50;
             }
             prevCityHappiness[city.cityId] = city.happiness;
             return;
@@ -514,6 +515,17 @@ public class CityManager : MonoBehaviour
             HappinessManager.Instance.educationBonus = educationBonus;
             HappinessManager.Instance.crimePenalty = crimePenalty;
             HappinessManager.Instance.crimeRate = city.crime;
+
+            int otherFactors = cfg.happinessBaseline;
+            if (RandomEventManager.Instance != null)
+                otherFactors += RandomEventManager.Instance.HappinessModifier;
+            if (GameManager.Instance.isGasShortage)
+                otherFactors -= 8;
+            else if (GameManager.Instance.monthlyGasSupplied > 0)
+                otherFactors += 3;
+            if (PolicyManager.Instance != null)
+                otherFactors += PolicyManager.Instance.HappinessModifier;
+            HappinessManager.Instance.otherFactorsBonus = otherFactors;
         }
 
         // ── THRESHOLD CROSSING NEWS ──────────
